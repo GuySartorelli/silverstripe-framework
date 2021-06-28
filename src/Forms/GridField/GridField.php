@@ -273,6 +273,8 @@ class GridField extends FormField
             $copyConfig->addComponent(GridFieldViewButton::create());
         }
 
+        $copy->extend('afterPerformReadonlyTransformation', $this);
+
         return $copy;
     }
 
