@@ -51,12 +51,13 @@ class ViewableData_Debugger extends ViewableData
         $reflector = new ReflectionObject($this->object);
         $debug = "<b>Debugging Information: all methods available in '{$class}'</b><br/><ul>";
         foreach ($this->object->allMethodNames() as $method) {
-            if ($method[0] !== '_') {
+            // check that the method is public
+            if ($method[0] === strtoupper($method[0] ?? '') && $method[0] != '_') {
                 if ($reflector->hasMethod($method) && $method = $reflector->getMethod($method)) {
                     if ($method->isPublic()) {
                         $debug .= "<li>\${$method->getName()}";
 
-                        if (count($method->getParameters())) {
+                        if (count($method->getParameters() ?? [])) {
                             $debug .= ' <small>(' . implode(', ', $method->getParameters()) . ')</small>';
                         }
 
