@@ -16,6 +16,7 @@ use SilverStripe\ORM\FieldType\DBField;
 use SilverStripe\ORM\FieldType\DBHTMLText;
 use SilverStripe\Security\Permission;
 use InvalidArgumentException;
+use SilverStripe\Template\View\SSViewer_DataPresenter;
 
 /**
  * Parses a template file with an *.ss file extension.
