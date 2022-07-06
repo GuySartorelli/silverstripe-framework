@@ -5,18 +5,14 @@ namespace SilverStripe\View;
 use SilverStripe\Core\Config\Config;
 use SilverStripe\Core\Config\Configurable;
 use SilverStripe\Core\ClassInfo;
-use Psr\SimpleCache\CacheInterface;
 use SilverStripe\Core\Convert;
-use SilverStripe\Core\Flushable;
 use SilverStripe\Core\Injector\Injector;
 use SilverStripe\Core\Injector\Injectable;
 use SilverStripe\Control\Director;
 use SilverStripe\Dev\Deprecation;
 use SilverStripe\ORM\FieldType\DBField;
 use SilverStripe\ORM\FieldType\DBHTMLText;
-use SilverStripe\Security\Permission;
 use InvalidArgumentException;
-use SilverStripe\Template\View\SSViewer_DataPresenter;
 
 /**
  * Parses a template file with an *.ss file extension.
@@ -40,7 +36,7 @@ use SilverStripe\Template\View\SSViewer_DataPresenter;
  * @see http://doc.silverstripe.org/themes
  * @see http://doc.silverstripe.org/themes:developing
  */
-class SSViewer implements Flushable
+class SSViewer
 {
     use Configurable;
     use Injectable;
@@ -141,18 +137,6 @@ class SSViewer implements Flushable
     protected $rewriteHashlinks = null;
 
     /**
-     * @internal
-     * @ignore
-     */
-    private static $template_cache_flushed = false;
-
-    /**
-     * @internal
-     * @ignore
-     */
-    private static $cacheblock_cache_flushed = false;
-
-    /**
      * List of items being processed
      *
      * @var array
@@ -186,11 +170,6 @@ class SSViewer implements Flushable
     protected $includeRequirements = true;
 
     /**
-     * @var CacheInterface
-     */
-    protected $partialCacheStore = null;
-
-    /**
      * @param string|array $templates If passed as a string with .ss extension, used as the "main" template.
      *  If passed as an array, it can be used for template inheritance (first found template "wins").
      *  Usually the array values are PHP class names, which directly correlate to template names.
@@ -215,15 +194,6 @@ class SSViewer implements Flushable
 
             user_error($message ?? '', E_USER_WARNING);
         }
-    }
-
-    /**
-     * Triggered early in the request when someone requests a flush.
-     */
-    public static function flush()
-    {
-        self::flush_template_cache(true);
-        self::flush_cacheblock_cache(true);
     }
 
     /**
@@ -473,70 +443,6 @@ class SSViewer implements Flushable
     }
 
     /**
-     * Clears all parsed template files in the cache folder.
-     *
-     * Can only be called once per request (there may be multiple SSViewer instances).
-     *
-     * @param bool $force Set this to true to force a re-flush. If left to false, flushing
-     * may only be performed once a request.
-     */
-    public static function flush_template_cache($force = false)
-    {
-        if (!self::$template_cache_flushed || $force) {
-            $dir = dir(TEMP_PATH);
-            while (false !== ($file = $dir->read())) {
-                if (strstr($file ?? '', '.cache')) {
-                    unlink(TEMP_PATH . DIRECTORY_SEPARATOR . $file);
-                }
-            }
-            self::$template_cache_flushed = true;
-        }
-    }
-
-    /**
-     * Clears all partial cache blocks.
-     *
-     * Can only be called once per request (there may be multiple SSViewer instances).
-     *
-     * @param bool $force Set this to true to force a re-flush. If left to false, flushing
-     * may only be performed once a request.
-     */
-    public static function flush_cacheblock_cache($force = false)
-    {
-        if (!self::$cacheblock_cache_flushed || $force) {
-            $cache = Injector::inst()->get(CacheInterface::class . '.cacheblock');
-            $cache->clear();
-
-
-            self::$cacheblock_cache_flushed = true;
-        }
-    }
-
-    /**
-     * Set the cache object to use when storing / retrieving partial cache blocks.
-     *
-     * @param CacheInterface $cache
-     */
-    public function setPartialCacheStore($cache)
-    {
-        $this->partialCacheStore = $cache;
-    }
-
-    /**
-     * Get the cache object to use when storing / retrieving partial cache blocks.
-     *
-     * @return CacheInterface
-     */
-    public function getPartialCacheStore()
-    {
-        if ($this->partialCacheStore) {
-            return $this->partialCacheStore;
-        }
-
-        return Injector::inst()->get(CacheInterface::class . '.cacheblock');
-    }
-
-    /**
      * Flag whether to include the requirements in this response.
      *
      * @param bool $incl
@@ -544,42 +450,6 @@ class SSViewer implements Flushable
     public function includeRequirements($incl = true)
     {
         $this->includeRequirements = $incl;
-    }
-
-    /**
-     * An internal utility function to set up variables in preparation for including a compiled
-     * template, then do the include
-     *
-     * Effectively this is the common code that both SSViewer#process and SSViewer_FromString#process call
-     *
-     * @param string $cacheFile The path to the file that contains the template compiled to PHP
-     * @param ViewableData $item The item to use as the root scope for the template
-     * @param array $overlay Any variables to layer on top of the scope
-     * @param array $underlay Any variables to layer underneath the scope
-     * @param ViewableData $inheritedScope The current scope of a parent template including a sub-template
-     * @return string The result of executing the template
-     */
-    protected function includeGeneratedTemplate($cacheFile, $item, $overlay, $underlay, $inheritedScope = null)
-    {
-        if (isset($_GET['showtemplate']) && $_GET['showtemplate'] && Permission::check('ADMIN')) {
-            $lines = file($cacheFile ?? '');
-            echo "<h2>Template: $cacheFile</h2>";
-            echo "<pre>";
-            foreach ($lines as $num => $line) {
-                echo str_pad($num+1, 5) . htmlentities($line, ENT_COMPAT, 'UTF-8');
-            }
-            echo "</pre>";
-        }
-
-        $cache = $this->getPartialCacheStore();
-        $scope = new SSViewer_DataPresenter($item, $overlay, $underlay, $inheritedScope);
-        $val = '';
-
-        // Placeholder for values exposed to $cacheFile
-        [$cache, $scope, $val];
-        include($cacheFile);
-
-        return $val;
     }
 
     /**
@@ -594,11 +464,11 @@ class SSViewer implements Flushable
      * Note: You can call this method indirectly by {@link ViewableData->renderWith()}.
      *
      * @param ViewableData $item
-     * @param array|null $arguments Arguments to an included template
-     * @param ViewableData $inheritedScope The current scope of a parent template including a sub-template
+     * @param array $arguments Arguments to an included template
+     * @param SSViewer_Scope|null $inheritedScope The current scope of a parent template including a sub-template
      * @return DBHTMLText Parsed template output.
      */
-    public function process($item, $arguments = null, $inheritedScope = null)
+    public function process($item, $arguments = [], $inheritedScope = null)
     {
         // Set hashlinks and temporarily modify global state
         $rewrite = $this->getRewriteHashLinks();
@@ -608,19 +478,7 @@ class SSViewer implements Flushable
         SSViewer::$topLevel[] = $item;
 
         $template = $this->chosen;
-
-        $cacheFile = TEMP_PATH . DIRECTORY_SEPARATOR . '.cache'
-            . str_replace(['\\','/',':'], '.', Director::makeRelative(realpath($template ?? '')) ?? '');
-        $lastEdited = filemtime($template ?? '');
-
-        if (!file_exists($cacheFile ?? '') || filemtime($cacheFile ?? '') < $lastEdited) {
-            $content = file_get_contents($template ?? '');
-            $content = $this->parseTemplateContent($content, $template);
-
-            $fh = fopen($cacheFile ?? '', 'w');
-            fwrite($fh, $content ?? '');
-            fclose($fh);
-        }
+        $engine = $this->getTemplateEngine($template);
 
         $underlay = ['I18NNamespace' => basename($template ?? '')];
 
@@ -649,7 +507,7 @@ class SSViewer implements Flushable
             };
         }
 
-        $output = $this->includeGeneratedTemplate($cacheFile, $item, $arguments, $underlay, $inheritedScope);
+        $output = $engine->process($template, $item, $arguments, $underlay, $inheritedScope);
 
         if ($this->includeRequirements) {
             $output = Requirements::includeInHTML($output);
@@ -792,22 +650,6 @@ PHP;
         if (array_key_exists($type, $engineConfig)) {
             return Injector::inst()->get($engineConfig[$type]);
         }
-    }
-
-    /**
-     * Parse given template contents
-     *
-     * @param string $content The template contents
-     * @param string $templateOrType The template file name, or the type of template (e.g. "ss", "twig", etc)
-     * @return string
-     */
-    public function parseTemplateContent($content, $templateOrType)
-    {
-        return $this->getTemplateEngine($templateOrType)->renderString(
-            $content,
-            Director::isDev() && SSViewer::config()->uninherited('source_file_comments'),
-            $templateOrType
-        );
     }
 
     /**

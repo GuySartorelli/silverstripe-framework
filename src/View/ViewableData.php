@@ -386,7 +386,7 @@ class ViewableData implements IteratorAggregate
      * @param array $customFields fields to customise() the object with before rendering
      * @return DBHTMLText
      */
-    public function renderWith($template, $customFields = null)
+    public function renderWith($template, $customFields = [])
     {
         if (!is_object($template)) {
             $template = SSViewer::create($template);
@@ -398,7 +398,7 @@ class ViewableData implements IteratorAggregate
             $data = $data->customise($customFields);
         }
         if ($template instanceof SSViewer) {
-            return $template->process($data, is_array($customFields) ? $customFields : null);
+            return $template->process($data, $customFields);
         }
 
         throw new UnexpectedValueException(
