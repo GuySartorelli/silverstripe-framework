@@ -93,6 +93,16 @@ class SSViewer implements Flushable
     private static $theme_enabled = true;
 
     /**
+     * Template engines, and the filetypes they are in charge of.
+     * There can only be one template engine per filetype.
+     *
+     * Format is file extension as key, template engine classname as value.
+     * e.g:
+     * ['ss' => 'MyApp\View\SSTemplateEngine']
+     */
+    private static array $template_engines = [];
+
+    /**
      * Default prepended cache key for partial caching
      *
      * @config
@@ -175,11 +185,6 @@ class SSViewer implements Flushable
     protected $includeRequirements = true;
 
     /**
-     * @var TemplateParser
-     */
-    protected $parser;
-
-    /**
      * @var CacheInterface
      */
     protected $partialCacheStore = null;
@@ -191,14 +196,9 @@ class SSViewer implements Flushable
      *  <code>
      *  array('MySpecificPage', 'MyPage', 'Page')
      *  </code>
-     * @param TemplateParser $parser
      */
-    public function __construct($templates, TemplateParser $parser = null)
+    public function __construct($templates)
     {
-        if ($parser) {
-            $this->setParser($parser);
-        }
-
         $this->setTemplate($templates);
 
         if (!$this->chosen) {
@@ -428,29 +428,6 @@ class SSViewer implements Flushable
     public static function chooseTemplate($templates)
     {
         return ThemeResourceLoader::inst()->findTemplate($templates, self::get_themes());
-    }
-
-    /**
-     * Set the template parser that will be used in template generation
-     *
-     * @param TemplateParser $parser
-     */
-    public function setParser(TemplateParser $parser)
-    {
-        $this->parser = $parser;
-    }
-
-    /**
-     * Returns the parser that is set for template generation
-     *
-     * @return TemplateParser
-     */
-    public function getParser()
-    {
-        if (!$this->parser) {
-            $this->setParser(Injector::inst()->get('SilverStripe\\View\\SSTemplateParser'));
-        }
-        return $this->parser;
     }
 
     /**
@@ -802,18 +779,33 @@ PHP;
     }
 
     /**
+     * @param string $templateOrType The template file name, or the type of template (e.g. "ss", "twig", etc)
+     *
+     * @return TemplateEngine
+     */
+    public function getTemplateEngine(string $templateOrType): TemplateEngine
+    {
+        $parts = explode('.', $templateOrType);
+        $type = end($parts);
+        $engineConfig = $this->config()->get('template_engines');
+        if (array_key_exists($type, $engineConfig)) {
+            return Injector::inst()->get($engineConfig[$type]);
+        }
+    }
+
+    /**
      * Parse given template contents
      *
      * @param string $content The template contents
-     * @param string $template The template file name
+     * @param string $templateOrType The template file name, or the type of template (e.g. "ss", "twig", etc)
      * @return string
      */
-    public function parseTemplateContent($content, $template = "")
+    public function parseTemplateContent($content, $templateOrType)
     {
-        return $this->getParser()->compileString(
+        return $this->getTemplateEngine($templateOrType)->renderString(
             $content,
-            $template,
-            Director::isDev() && SSViewer::config()->uninherited('source_file_comments')
+            Director::isDev() && SSViewer::config()->uninherited('source_file_comments'),
+            $templateOrType
         );
     }
 
