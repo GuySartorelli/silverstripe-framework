@@ -175,11 +175,11 @@ class ThemeResourceLoader implements Flushable
      * 'type' (type string) and 'templates' (template hierarchy in order of precedence).
      * If 'templates' is omitted then any other item in the array will be treated as the template
      * list, or list of templates each in the array spec given.
-     * Templates with an .ss extension will be treated as file paths, and will bypass
+     * Templates with a registered template file extension will be treated as file paths, and will bypass
      * theme-coupled resolution.
      * @param array $themes List of themes to use to resolve themes. Defaults to {@see SSViewer::get_themes()}
      * @return string Absolute path to resolved template file, or null if not resolved.
-     * File location will be in the format themes/<theme>/templates/<directories>/<type>/<basename>.ss
+     * File location will be in the format themes/<theme>/templates/<directories>/<type>/<basename>.<ext>
      * Note that type (e.g. 'Layout') is not the root level directory under 'templates'.
      */
     public function findTemplate($template, $themes = null)
@@ -218,10 +218,10 @@ class ThemeResourceLoader implements Flushable
                 continue;
             }
 
-            // If we have an .ss extension, this is a path, not a template name. We should
-            // pass in templates without extensions in order for template manifest to find
+            // If we have a registered template file extension, this is a path, not a template name.
+            // We should pass in templates without extensions in order for template manifest to find
             // files dynamically.
-            if (substr($template ?? '', -3) == '.ss' && file_exists($template ?? '')) {
+            if (SSViewer::templateHasEngine($template) && file_exists($template ?? '')) {
                 $this->getCache()->set($cacheKey, $template);
                 return $template;
             }
@@ -236,14 +236,16 @@ class ThemeResourceLoader implements Flushable
             foreach ($themePaths as $themePath) {
                 // Join path
                 $pathParts = [ $this->base, $themePath, 'templates', $head, $type, $tail ];
-                try {
-                    $path = Path::join($pathParts) . '.ss';
-                    if (file_exists($path ?? '')) {
-                        $this->getCache()->set($cacheKey, $path);
-                        return $path;
+                foreach (array_keys(SSViewer::config()->get('template_engines')) as $ext) {
+                    try {
+                        $path = Path::join($pathParts) . ".$ext";
+                        if (file_exists($path ?? '')) {
+                            $this->getCache()->set($cacheKey, $path);
+                            return $path;
+                        }
+                    } catch (InvalidArgumentException $e) {
+                        // No-op
                     }
-                } catch (InvalidArgumentException $e) {
-                    // No-op
                 }
             }
         }

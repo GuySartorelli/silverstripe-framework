@@ -15,14 +15,14 @@ use SilverStripe\ORM\FieldType\DBHTMLText;
 use InvalidArgumentException;
 
 /**
- * Parses a template file with an *.ss file extension.
+ * Handles template folder structure and passes templates to template engines for parsing.
  *
  * In addition to a full template in the templates/ folder, a template in
  * templates/Content or templates/Layout will be rendered into $Content and
  * $Layout, respectively.
  *
  * A single template can be parsed by multiple nested {@link SSViewer} instances
- * through $Layout/$Content placeholders, as well as <% include MyTemplateFile %> template commands.
+ * through $Layout/$Content placeholders, as well as "include" template commands.
  *
  * <b>Themes</b>
  *
@@ -30,8 +30,8 @@ use InvalidArgumentException;
  *
  * <b>Caching</b>
  *
- * Compiled templates are cached via {@link Cache}, usually on the filesystem.
- * If you put ?flush=1 on your URL, it will force the template to be recompiled.
+ * Template caching is handled by the individual template engines.
+ * If you put ?flush=1 on your URL, template cache will be flushed.
  *
  * @see http://doc.silverstripe.org/themes
  * @see http://doc.silverstripe.org/themes:developing
@@ -129,6 +129,14 @@ class SSViewer
     protected static $current_rewrite_hash_links = null;
 
     /**
+     * List of global property providers
+     *
+     * @internal
+     * @var TemplateGlobalProvider[]|null
+     */
+    private static $globalProperties = null;
+
+    /**
      * Instance variable to disable rewrite_hash_links (overrides global default)
      * Leave null to use global state.
      *
@@ -170,7 +178,7 @@ class SSViewer
     protected $includeRequirements = true;
 
     /**
-     * @param string|array $templates If passed as a string with .ss extension, used as the "main" template.
+     * @param string|array $templates If passed as a string with registered extension, used as the "main" template.
      *  If passed as an array, it can be used for template inheritance (first found template "wins").
      *  Usually the array values are PHP class names, which directly correlate to template names.
      *  <code>
@@ -197,7 +205,7 @@ class SSViewer
     }
 
     /**
-     * Create a template from a string instead of a .ss file
+     * Create a template from a string instead of a file
      *
      * @param string $content The template content
      * @param bool|void $cacheTemplate Whether or not to cache the template from string
@@ -305,7 +313,7 @@ class SSViewer
             $templates[] = $template;
             $templates[] = ['type' => 'Includes', $template];
 
-            // If the class is "PageController" (PSR-2 compatibility) or "Page_Controller" (legacy), look for Page.ss
+            // If the class is "PageController" (PSR-2 compatibility) or "Page_Controller" (legacy), look for Page.<ext>
             if (preg_match('/^(?<name>.+[^\\\\])_?Controller$/iU', $class ?? '', $matches)) {
                 $templates[] = $matches['name'] . $suffix;
             }
@@ -316,6 +324,71 @@ class SSViewer
         }
 
         return $templates;
+    }
+
+    /**
+     * Build cache of global properties
+     */
+    public static function getGlobalProperties(): array
+    {
+        if (self::$globalProperties === null) {
+            self::$globalProperties = self::getPropertiesFromProvider(
+                TemplateGlobalProvider::class,
+                'get_template_global_variables'
+            );
+        }
+
+        return self::$globalProperties;
+    }
+
+    /**
+     * Get properties from a template properties provider (e.g. TemplateGlobalProvider)
+     */
+    public static function getPropertiesFromProvider(string $interfaceToQuery, string $variableMethod, bool $createObject = false): array
+    {
+        $result = [];
+
+        $implementors = ClassInfo::implementorsOf($interfaceToQuery);
+        if ($implementors) {
+            foreach ($implementors as $implementor) {
+                // Create a new instance of the object for method calls
+                if ($createObject) {
+                    $implementor = new $implementor();
+                    $exposedVariables = $implementor->$variableMethod();
+                } else {
+                    $exposedVariables = $implementor::$variableMethod();
+                }
+
+                foreach ($exposedVariables as $varName => $details) {
+                    if (!is_array($details)) {
+                        $details = [
+                            'method' => $details,
+                            'casting' => self::config()->uninherited('default_cast')
+                        ];
+                    }
+
+                    // If just a value (and not a key => value pair), use method name for both key and value
+                    if (is_numeric($varName)) {
+                        $varName = $details['method'];
+                    }
+
+                    // Add in a reference to the implementing class (might be a string class name or an instance)
+                    $details['implementor'] = $implementor;
+
+                    // And a callable array
+                    if (isset($details['method'])) {
+                        $details['callable'] = [$implementor, $details['method']];
+                    }
+
+                    // Save with both uppercase & lowercase first letter, so either works
+                    $lcFirst = strtolower($varName[0] ?? '') . substr($varName ?? '', 1);
+                    $result[$lcFirst] = $details;
+                    $result[ucfirst($varName)] = $details;
+                }
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -433,7 +506,7 @@ class SSViewer
     }
 
     /**
-     * @param string $identifier A template name without '.ss' extension or path
+     * @param string $identifier A template name without file extension or path
      * @param string $type The template type, either "main", "Includes" or "Layout"
      * @return string Full system path to a template file
      */
@@ -450,6 +523,17 @@ class SSViewer
     public function includeRequirements($incl = true)
     {
         $this->includeRequirements = $incl;
+    }
+
+    /**
+     * Check if a template file has a registered template engine
+     */
+    public static function templateHasEngine(string $templateFileName): bool
+    {
+        $parts = explode('.', $templateFileName);
+        $type = end($parts);
+        $engineConfig = self::config()->get('template_engines');
+        return array_key_exists($type, $engineConfig);
     }
 
     /**
