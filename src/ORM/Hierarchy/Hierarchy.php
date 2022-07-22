@@ -2,7 +2,6 @@
 
 namespace SilverStripe\ORM\Hierarchy;
 
-use SilverStripe\Admin\LeftAndMain;
 use SilverStripe\Control\Controller;
 use SilverStripe\Core\ClassInfo;
 use SilverStripe\ORM\DataList;
@@ -16,6 +15,7 @@ use SilverStripe\Versioned\Versioned;
 use SilverStripe\Core\Config\Config;
 use SilverStripe\Core\Convert;
 use Exception;
+use SilverStripe\Admin\ModelTreeAdmin;
 use SilverStripe\View\ViewableData;
 
 /**
@@ -62,19 +62,6 @@ class Hierarchy extends DataExtension
      * @config
      */
     private static $hide_from_hierarchy = [];
-
-    /**
-     * A list of classnames to exclude from display in the page tree views of the CMS,
-     * unlike $hide_from_hierarchy above which effects both CMS and front end.
-     * Especially useful for big sets of pages like listings
-     * If you use this, and still need the classes to be editable
-     * then add a model admin for the class
-     * Note: Does not filter subclasses (non-inheriting)
-     *
-     * @var array
-     * @config
-     */
-    private static $hide_from_cms_tree = [];
 
     /**
      * Used to enable or disable the prepopulation of the numchildren cache.
@@ -395,21 +382,6 @@ class Hierarchy extends DataExtension
     }
 
     /**
-     * Checks if we're on a controller where we should filter. ie. Are we loading the SiteTree?
-     *
-     * @return bool
-     */
-    public function showingCMSTree()
-    {
-        if (!Controller::has_curr() || !class_exists(LeftAndMain::class)) {
-            return false;
-        }
-        $controller = Controller::curr();
-        return $controller instanceof LeftAndMain
-            && in_array($controller->getAction(), ["treeview", "listview", "getsubtree"]);
-    }
-
-    /**
      * Find the first class in the inheritance chain that has Hierarchy extension applied
      *
      * @return string
@@ -438,7 +410,6 @@ class Hierarchy extends DataExtension
         /** @var DataObject|Hierarchy $owner */
         $owner = $this->owner;
         $hideFromHierarchy = $owner->config()->hide_from_hierarchy;
-        $hideFromCMSTree = $owner->config()->hide_from_cms_tree;
         $class = $this->getHierarchyBaseClass();
 
         $schema = DataObject::getSchema();
@@ -460,9 +431,6 @@ class Hierarchy extends DataExtension
 
         if ($hideFromHierarchy) {
             $staged = $staged->exclude('ClassName', $hideFromHierarchy);
-        }
-        if ($hideFromCMSTree && $this->showingCMSTree()) {
-            $staged = $staged->exclude('ClassName', $hideFromCMSTree);
         }
         if (!$showAll && DataObject::getSchema()->fieldSpec($this->owner, 'ShowInMenus')) {
             $staged = $staged->filter('ShowInMenus', 1);
@@ -489,7 +457,6 @@ class Hierarchy extends DataExtension
         }
 
         $hideFromHierarchy = $owner->config()->hide_from_hierarchy;
-        $hideFromCMSTree = $owner->config()->hide_from_cms_tree;
         $children = DataObject::get($this->getHierarchyBaseClass())
             ->filter('ParentID', (int)$owner->ID)
             ->exclude('ID', (int)$owner->ID)
@@ -499,9 +466,6 @@ class Hierarchy extends DataExtension
             ]);
         if ($hideFromHierarchy) {
             $children = $children->exclude('ClassName', $hideFromHierarchy);
-        }
-        if ($hideFromCMSTree && $this->showingCMSTree()) {
-            $children = $children->exclude('ClassName', $hideFromCMSTree);
         }
         if (!$showAll && DataObject::getSchema()->fieldSpec($owner, 'ShowInMenus')) {
             $children = $children->filter('ShowInMenus', 1);
