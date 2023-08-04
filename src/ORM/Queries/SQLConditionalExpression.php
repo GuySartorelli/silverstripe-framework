@@ -8,6 +8,7 @@ namespace SilverStripe\ORM\Queries;
  */
 abstract class SQLConditionalExpression extends SQLExpression
 {
+    public const JOIN_REGEX = '/JOIN +("[^"]+") +(AS|ON) +/i';
 
     /**
      * An array of WHERE clauses.
@@ -226,7 +227,7 @@ abstract class SQLConditionalExpression extends SQLExpression
         foreach ($this->from as $key => $tableClause) {
             if (is_array($tableClause)) {
                 $table = '"' . $tableClause['table'] . '"';
-            } elseif (is_string($tableClause) && preg_match('/JOIN +("[^"]+") +(AS|ON) +/i', $tableClause ?? '', $matches)) {
+            } elseif (is_string($tableClause) && preg_match(self::JOIN_REGEX, $tableClause ?? '', $matches)) {
                 $table = $matches[1];
             } else {
                 $table = $tableClause;
@@ -325,11 +326,16 @@ abstract class SQLConditionalExpression extends SQLExpression
             return $from;
         }
 
-        // shift the first FROM table out from so we only deal with the JOINs
-        reset($from);
-        $baseFromAlias = key($from ?? []);
-        $baseFrom = array_shift($from);
+        // Remove the regular FROM tables out so we only deal with the JOINs
+        $regularTables = [];
+        foreach ($from as $alias => $tableClause) {
+            if (is_string($tableClause) && !preg_match(self::JOIN_REGEX, $tableClause)) {
+                $regularTables[$alias] = $tableClause;
+                unset($from[$alias]);
+            }
+        }
 
+        // Sort the joins
         $this->mergesort($from, function ($firstJoin, $secondJoin) {
             if (!is_array($firstJoin)
                 || !is_array($secondJoin)
@@ -341,11 +347,13 @@ abstract class SQLConditionalExpression extends SQLExpression
             }
         });
 
-        // Put the first FROM table back into the results
-        if (!empty($baseFromAlias) && !is_numeric($baseFromAlias)) {
-            $from = array_merge([$baseFromAlias => $baseFrom], $from);
-        } else {
-            array_unshift($from, $baseFrom);
+        // Put the regular FROM tables back into the results
+        foreach ($regularTables as $alias => $tableName) {
+            if (!empty($alias) && !is_numeric($alias)) {
+                $from = array_merge([$alias => $tableName], $from);
+            } else {
+                array_unshift($from, $tableName);
+            }
         }
 
         return $from;

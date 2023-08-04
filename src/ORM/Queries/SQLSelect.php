@@ -5,6 +5,7 @@ namespace SilverStripe\ORM\Queries;
 use SilverStripe\Core\Injector\Injector;
 use SilverStripe\ORM\DB;
 use InvalidArgumentException;
+use LogicException;
 
 /**
  * Object representing a SQL SELECT query.
@@ -35,6 +36,17 @@ class SQLSelect extends SQLConditionalExpression
      * @var array
      */
     protected $having = [];
+
+    /**
+     * An array of with clauses.
+     * This array is indexed with the with Name, and contains data in the following format:
+     * [
+     *   'args' => string[],
+     *   'baseQuery' => ?SQLSelect,
+     *   'recursiveQuery' => ?SQLSelect,
+     * ]
+     */
+    protected array $with = [];
 
     /**
      * If this is true DISTINCT will be added to the SQL.
@@ -527,6 +539,24 @@ class SQLSelect extends SQLConditionalExpression
     {
         $this->splitQueryParameters($this->having, $conditions, $parameters);
         return $conditions;
+    }
+
+    public function addWith(string $name, array $args = [], ?SQLSelect $withBase = null, ?SQLSelect $withRecursive = null): static
+    {
+        if (array_key_exists($name, $this->with)) {
+            throw new LogicException("With statement with name '$name' already exists.");
+        }
+        $this->with[$name] = [
+            'args' => $args,
+            'baseQuery' => $withBase,
+            'recursiveQuery' => $withRecursive,
+        ];
+        return $this;
+    }
+
+    public function getWith(): array
+    {
+        return $this->with;
     }
 
     /**

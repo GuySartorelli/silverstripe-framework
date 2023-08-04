@@ -16,6 +16,7 @@ use SilverStripe\Versioned\Versioned;
 use SilverStripe\Core\Config\Config;
 use SilverStripe\Core\Convert;
 use Exception;
+use SilverStripe\ORM\Queries\SQLSelect;
 use SilverStripe\View\ViewableData;
 
 /**
@@ -539,14 +540,56 @@ class Hierarchy extends DataExtension
      */
     public function getAncestors($includeSelf = false)
     {
+        $table = $this->owner->baseTable();
+
+        // @TODO Make a DataQuery API for this
+        //       Automatically adds the join
+        //       probably automatically named alias?
+        //       Not sure how abstract we need to make the base and recursive queries - maybe base can accept DataQuery?
+        // @TODO Make a DataList API for this
+        //       Allow filtering and sorting by the recursive table fields (args)
+        //       Not sure how abstract we need to make the base and recursive queries - maybe base can accept DataList?
+        // @TODO Ensure this specific implementation is compatible with getParent()
+        // @TODO mysql 5.7 doesn't support WITH RECURSIVE.... do we stop supporting it? Or can we have a IF 5.7 DO X ELSE DO Y?
+        //       Don't worry about that just yet, though. Get it working with this syntax in a clean generalised way first.
+        // @TODO fix broken builds
+        //       SEE https://github.com/GuySartorelli/silverstripe-framework/actions/runs/5758157653/job/15610259235 for when it was a raw DB::query
+        //       SEE https://github.com/GuySartorelli/silverstripe-framework/actions/runs/5758790963 for any failures in a post-SQLSelect world
+        // @TODO tests
+        //       For the SQLSelect tests, ensure we can select from the recursion table directly, not just select from the actual db table
+
+        $baseQuery = SQLSelect::create('ParentID', $table, [['ParentID > 0 AND ID = ?' => 11]]);
+        $recursiveQuery = SQLSelect::create('ParentID', ['Ancestor', $table], ['ParentID > 0 AND ID = Ancestor.pid']);
+        $rows = SQLSelect::create(from: $table)->addInnerJoin('Ancestor', 'ID = Ancestor.pid')->addWith('Ancestor', ['pid'], $baseQuery, $recursiveQuery)->execute();
+
+        // $rows = DB::query(
+        //     <<<SQL
+        //     WITH RECURSIVE Ancestor (pid) AS (
+        //         -- Get the current record, but only if the current record has a parent ID
+        //         SELECT ParentID FROM {$table} WHERE ParentID > 0 AND ID = {$this->owner->ID}
+        //         UNION ALL
+        //         -- Recursively fetch ancestors - stop when there are no more parent IDs to look at
+        //         SELECT ParentID FROM Ancestor, {$table}
+        //             WHERE ParentID > 0 AND ID = Ancestor.pid
+        //     )
+        //     -- Get records where the ancestor pid matches an ID in the base table - getting me all ancestors
+        //     -- which means any pid where the parent was deleted won't return a record
+        //     -- @TODO if it DOESN'T match, that's what I care about here.
+        //     SELECT * FROM {$table}
+        //         INNER JOIN Ancestor ON ID = Ancestor.pid
+        //     SQL
+        // );
+
+
         $ancestors = new ArrayList();
-        $object = $this->owner;
 
         if ($includeSelf) {
-            $ancestors->push($object);
+            $ancestors->push($this->owner);
         }
-        while ($object = $object->getParent()) {
-            $ancestors->push($object);
+
+        $list = DataList::create($this->owner->ClassName);
+        foreach ($rows as $row) {
+            $ancestors->push($list->createDataObject($row));
         }
 
         return $ancestors;

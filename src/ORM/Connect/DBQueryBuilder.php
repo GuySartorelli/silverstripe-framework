@@ -68,7 +68,8 @@ class DBQueryBuilder
      */
     protected function buildSelectQuery(SQLSelect $query, array &$parameters)
     {
-        $sql  = $this->buildSelectFragment($query, $parameters);
+        $sql  = $this->buildWithFragment($query, $parameters);
+        $sql .= $this->buildSelectFragment($query, $parameters);
         $sql .= $this->buildFromFragment($query, $parameters);
         $sql .= $this->buildWhereFragment($query, $parameters);
         $sql .= $this->buildGroupByFragment($query, $parameters);
@@ -153,6 +154,44 @@ class DBQueryBuilder
         $sql  = $this->buildUpdateFragment($query, $parameters);
         $sql .= $this->buildWhereFragment($query, $parameters);
         return $sql;
+    }
+
+    /**
+     * Returns the WITH clauses ready for inserting into a query.
+     */
+    protected function buildWithFragment(SQLSelect $query, array &$parameters): string
+    {
+        $with = $query->getWith();
+        if (empty($with)) {
+            return '';
+        }
+
+        $nl = $this->getSeparator();
+        $clauses = [];
+
+        foreach ($with as $name => $bits) {
+            $clause = $bits['recursiveQuery'] ? 'RECURSIVE ' : '';
+            $clause .= $name;
+
+            if (!empty($bits['args'])) {
+                $clause .= ' (' . implode(', ', $bits['args']) . ')';
+            }
+
+            $clause .= ' AS (';
+
+            if ($baseQuery = $bits['baseQuery']) {
+                $clause .= $this->buildSelectQuery($baseQuery, $parameters) . $nl;
+            }
+
+            if ($recursiveQuery = $bits['recursiveQuery']) {
+                $clause .= 'UNION ALL' . $nl . $this->buildSelectQuery($recursiveQuery, $parameters) . $nl;
+            }
+
+            $clause .= ')';
+            $clauses[] = $clause;
+        }
+
+        return 'WITH ' . implode(",{$nl}", $clauses) . $nl;
     }
 
     /**
@@ -242,9 +281,20 @@ class DBQueryBuilder
     public function buildFromFragment(SQLConditionalExpression $query, array &$parameters)
     {
         $from = $query->getJoins($joinParameters);
+        $tables = [];
+        $joins = [];
+
+        foreach ($from as $joinOrTable) {
+            if (preg_match(SQLConditionalExpression::JOIN_REGEX, $joinOrTable)) {
+                $joins[] = $joinOrTable;
+            } else {
+                $tables[] = $joinOrTable;
+            }
+        }
+
         $parameters = array_merge($parameters, $joinParameters);
         $nl = $this->getSeparator();
-        return  "{$nl}FROM " . implode(' ', $from);
+        return  "{$nl}FROM " . implode(', ', $tables) . ' ' . implode(' ', $joins);
     }
 
     /**
