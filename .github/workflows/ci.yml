@@ -8,7 +8,7 @@ on:
 jobs:
   ci:
     name: CI
-    uses: silverstripe/gha-ci/.github/workflows/ci.yml@v1
+    uses: GuySartorelli/gha-ci/.github/workflows/ci.yml@1
     with:
       # Turn phpcoverage off because it causes a segfault
       phpcoverage_force_off: true
