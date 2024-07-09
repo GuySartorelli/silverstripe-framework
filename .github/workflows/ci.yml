@@ -8,7 +8,13 @@ on:
 jobs:
   ci:
     name: CI
-    uses: silverstripe/gha-ci/.github/workflows/ci.yml@v1
+    uses: creative-commoners/gha-ci/.github/workflows/ci.yml@pulls/1/in-memory-cache
     with:
       # Turn phpcoverage off because it causes a segfault
       phpcoverage_force_off: true
+      phpunit_skip_suites: framework-cache-only
+      # Ensure we test all in-memory cache factories provided in core
+      extra_jobs: |
+        - phpunit: true
+          phpunit_suite: framework-cache-only
+          install_inmemory_cache_exts: true
